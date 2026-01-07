@@ -9,7 +9,7 @@
  * Based on the Ralph Wiggum technique: https://ghuntley.com/ralph/
  */
 
-import type { Plugin } from "@opencode-ai/plugin";
+import { tool, type Plugin } from "@opencode-ai/plugin";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 
@@ -189,30 +189,17 @@ export const RalphWiggumPlugin: Plugin = async (ctx) => {
 
     // Custom tools for Ralph loop management
     tool: {
-      ralph_start: {
+      ralph_start: tool({
         description: "Start a Ralph Wiggum loop with the given prompt",
         args: {
-          prompt: {
-            type: "string",
-            description: "The task prompt to iterate on",
-          },
-          maxIterations: {
-            type: "number",
-            description: "Maximum iterations (0 = unlimited)",
-            optional: true,
-          },
-          completionPromise: {
-            type: "string",
-            description: "The promise text that signals completion",
-            optional: true,
-          },
+          prompt: tool.schema.string().describe("The task prompt to iterate on"),
+          maxIterations: tool.schema.number().optional().describe("Maximum iterations (0 = unlimited)"),
+          completionPromise: tool.schema.string().optional().describe("The promise text that signals completion"),
         },
-        async execute(args: { prompt: string; maxIterations?: number; completionPromise?: string }) {
+        async execute(args) {
           const existingState = loadState(directory);
           if (existingState?.active) {
-            return {
-              result: `Ralph loop already active at iteration ${existingState.iteration}. Use ralph_cancel to stop it first.`,
-            };
+            return `Ralph loop already active at iteration ${existingState.iteration}. Use ralph_cancel to stop it first.`;
           }
 
           const state: RalphState = {
@@ -226,8 +213,7 @@ export const RalphWiggumPlugin: Plugin = async (ctx) => {
 
           saveState(directory, state);
 
-          return {
-            result: `🔄 Ralph loop started!
+          return `🔄 Ralph loop started!
 Iteration: 1
 Max iterations: ${state.maxIterations > 0 ? state.maxIterations : "unlimited"}
 Completion promise: ${state.completionPromise}
@@ -235,51 +221,51 @@ Completion promise: ${state.completionPromise}
 The loop will continue after each session idle until you output:
 <promise>${state.completionPromise}</promise>
 
-Now working on: ${args.prompt.substring(0, 100)}${args.prompt.length > 100 ? "..." : ""}`,
-          };
+Now working on: ${args.prompt.substring(0, 100)}${args.prompt.length > 100 ? "..." : ""}`;
         },
-      },
+      }),
 
-      ralph_status: {
+      ralph_status: tool({
         description: "Check the status of the current Ralph Wiggum loop",
         args: {},
         async execute() {
           const state = loadState(directory);
           if (!state || !state.active) {
-            return { result: "No active Ralph loop" };
+            return "No active Ralph loop";
           }
-          return {
-            result: `🔄 Ralph loop active:
+          return `🔄 Ralph loop active:
 - Iteration: ${state.iteration}${state.maxIterations > 0 ? ` / ${state.maxIterations}` : " (unlimited)"}
 - Completion promise: ${state.completionPromise}
 - Started: ${state.startedAt}
 - Prompt: ${state.prompt.substring(0, 100)}${state.prompt.length > 100 ? "..." : ""}
 
 To complete, output: <promise>${state.completionPromise}</promise>
-To cancel: use ralph_cancel tool`,
-          };
+To cancel: use ralph_cancel tool`;
         },
-      },
+      }),
 
-      ralph_cancel: {
+      ralph_cancel: tool({
         description: "Cancel the current Ralph Wiggum loop",
         args: {},
         async execute() {
           const state = loadState(directory);
           if (!state || !state.active) {
-            return { result: "No active Ralph loop to cancel" };
+            return "No active Ralph loop to cancel";
           }
           const iteration = state.iteration;
           clearState(directory);
-          return { result: `🛑 Cancelled Ralph loop at iteration ${iteration}` };
+          return `🛑 Cancelled Ralph loop at iteration ${iteration}`;
         },
-      },
+      }),
     },
 
     // Inject Ralph context into chat messages when loop is active
     "chat.message": async ({ input, output }) => {
       const state = loadState(directory);
       if (state && state.active) {
+        if (!output?.messages || !Array.isArray(output.messages)) {
+          return;
+        }
         // Add system context about the Ralph loop
         const ralphContext = `[🔄 Ralph Loop Active - Iteration ${state.iteration}${state.maxIterations > 0 ? ` / ${state.maxIterations}` : ""}]
 [Complete by outputting: <promise>${state.completionPromise}</promise>]`;

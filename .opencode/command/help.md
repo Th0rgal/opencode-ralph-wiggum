@@ -55,6 +55,7 @@ ralph "Your task description"
 # With options
 ralph "Your task" --max-iterations 20 --model anthropic/claude-sonnet
 ralph "Your task" --completion-promise "DONE"
+ralph "Your task" --no-plugins
 ```
 
 ## Key Concepts

@@ -5,15 +5,18 @@ set -e
 
 echo "Uninstalling OpenCode Ralph Wiggum..."
 
+# Determine OpenCode config directory (XDG-compatible)
+OPENCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+
 # Remove OpenCode commands
 echo "Removing OpenCode commands..."
-rm -f ~/.config/opencode/command/ralph-loop.md
-rm -f ~/.config/opencode/command/cancel-ralph.md
-rm -f ~/.config/opencode/command/help.md
+rm -f "$OPENCODE_CONFIG_DIR/command/ralph-loop.md"
+rm -f "$OPENCODE_CONFIG_DIR/command/cancel-ralph.md"
+rm -f "$OPENCODE_CONFIG_DIR/command/help.md"
 
 # Remove OpenCode plugin
 echo "Removing OpenCode plugin..."
-rm -f ~/.config/opencode/plugin/ralph-wiggum.ts
+rm -f "$OPENCODE_CONFIG_DIR/plugin/ralph-wiggum.ts"
 
 # Unlink the package
 echo "Unlinking ralph command..."

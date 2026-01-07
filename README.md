@@ -49,10 +49,20 @@ done
 
 **Prerequisites:** [Bun](https://bun.sh) and [OpenCode](https://opencode.ai)
 
+### macOS / Linux
+
 ```bash
 git clone https://github.com/Th0rgal/opencode-ralph-wiggum
 cd opencode-ralph-wiggum
 ./install.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/Th0rgal/opencode-ralph-wiggum
+cd opencode-ralph-wiggum
+.\install.ps1
 ```
 
 This installs:
@@ -132,6 +142,7 @@ Options:
   --max-iterations N       Stop after N iterations (default: unlimited)
   --completion-promise T   Text that signals completion (default: COMPLETE)
   --model MODEL            OpenCode model to use
+  --no-plugins             Disable non-auth OpenCode plugins for this run
   --no-commit              Don't auto-commit after iterations
   --help                   Show help
 ```
@@ -153,6 +164,17 @@ When the plugin is active, these tools are available in OpenCode:
 | `ralph_start` | Start a loop with prompt, max iterations, completion promise |
 | `ralph_status` | Check current loop status and iteration |
 | `ralph_cancel` | Cancel the active loop |
+
+## Troubleshooting
+
+### "ralph-wiggum is not yet ready for use. This is a placeholder package."
+
+OpenCode is trying to load the npm package `ralph-wiggum`, which is a placeholder.
+Remove `ralph-wiggum` from your OpenCode `plugin` list (opencode.json), or run:
+
+```bash
+ralph "Your task" --no-plugins
+```
 
 ## Writing Good Prompts
 
@@ -263,6 +285,10 @@ opencode-ralph-wiggum/
 
 ```bash
 ./uninstall.sh
+```
+
+```powershell
+.\uninstall.ps1
 ```
 
 ## Learn More

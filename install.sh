@@ -31,15 +31,18 @@ bun install
 echo "Linking ralph command..."
 bun link
 
+# Determine OpenCode config directory (XDG-compatible)
+OPENCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+
 # Install OpenCode commands globally
 echo "Installing OpenCode commands..."
-mkdir -p ~/.config/opencode/command
-cp "$SCRIPT_DIR/.opencode/command/"*.md ~/.config/opencode/command/
+mkdir -p "$OPENCODE_CONFIG_DIR/command"
+cp "$SCRIPT_DIR/.opencode/command/"*.md "$OPENCODE_CONFIG_DIR/command/"
 
 # Install OpenCode plugin globally
 echo "Installing OpenCode plugin..."
-mkdir -p ~/.config/opencode/plugin
-cp "$SCRIPT_DIR/.opencode/plugin/"*.ts ~/.config/opencode/plugin/
+mkdir -p "$OPENCODE_CONFIG_DIR/plugin"
+cp "$SCRIPT_DIR/.opencode/plugin/"*.ts "$OPENCODE_CONFIG_DIR/plugin/"
 
 echo ""
 echo "Installation complete!"

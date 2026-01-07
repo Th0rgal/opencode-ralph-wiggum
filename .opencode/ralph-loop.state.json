@@ -1,0 +1,9 @@
+{
+  "active": true,
+  "iteration": 1,
+  "maxIterations": 1,
+  "completionPromise": "DONE",
+  "prompt": "Create a hello.txt file containing 'Hello World'. Output <promise>DONE</promise> when complete.",
+  "startedAt": "2026-01-07T09:08:36.651Z",
+  "model": "anthropic/claude-sonnet"
+}

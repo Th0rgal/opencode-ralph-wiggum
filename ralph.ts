@@ -29,6 +29,7 @@ Options:
   --max-iterations N  Maximum iterations before stopping (default: unlimited)
   --completion-promise TEXT  Phrase that signals completion (default: COMPLETE)
   --model MODEL       Model to use (e.g., anthropic/claude-sonnet)
+  --no-plugins        Disable non-auth OpenCode plugins for this run
   --no-commit         Don't auto-commit after each iteration
   --version, -v       Show version
   --help, -h          Show this help
@@ -64,6 +65,7 @@ let maxIterations = 0; // 0 = unlimited
 let completionPromise = "COMPLETE";
 let model = "";
 let autoCommit = true;
+let disablePlugins = false;
 
 const promptParts: string[] = [];
 
@@ -93,6 +95,8 @@ for (let i = 0; i < args.length; i++) {
     model = val;
   } else if (arg === "--no-commit") {
     autoCommit = false;
+  } else if (arg === "--no-plugins") {
+    disablePlugins = true;
   } else if (arg.startsWith("-")) {
     console.error(`Error: Unknown option: ${arg}`);
     console.error("Run 'ralph --help' for available options");
@@ -152,6 +156,49 @@ function clearState(): void {
   }
 }
 
+function loadPluginsFromConfig(configPath: string): string[] {
+  if (!existsSync(configPath)) {
+    return [];
+  }
+  try {
+    const raw = readFileSync(configPath, "utf-8");
+    // Basic JSONC support: strip // and /* */ comments.
+    const withoutBlock = raw.replace(/\/\*[\s\S]*?\*\//g, "");
+    const withoutLine = withoutBlock.replace(/^\s*\/\/.*$/gm, "");
+    const parsed = JSON.parse(withoutLine);
+    const plugins = parsed?.plugin;
+    return Array.isArray(plugins) ? plugins.filter(p => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function ensureFilteredPluginsConfig(): string {
+  if (!existsSync(stateDir)) {
+    mkdirSync(stateDir, { recursive: true });
+  }
+  const configPath = join(stateDir, "ralph-opencode.no-plugins.json");
+  const userConfigPath = join(process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config"), "opencode", "opencode.json");
+  const projectConfigPath = join(process.cwd(), ".opencode", "opencode.json");
+  const plugins = [
+    ...loadPluginsFromConfig(userConfigPath),
+    ...loadPluginsFromConfig(projectConfigPath),
+  ];
+  const filtered = Array.from(new Set(plugins)).filter(p => p !== "ralph-wiggum");
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        $schema: "https://opencode.ai/config.json",
+        plugin: filtered,
+      },
+      null,
+      2,
+    ),
+  );
+  return configPath;
+}
+
 // Build the full prompt with iteration context
 function buildPrompt(state: RalphState): string {
   return `
@@ -195,6 +242,10 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function detectPlaceholderPluginError(output: string): boolean {
+  return output.includes("ralph-wiggum is not yet ready for use. This is a placeholder package.");
+}
+
 // Main loop
 async function runRalphLoop(): Promise<void> {
   // Check if a loop is already running
@@ -230,6 +281,7 @@ async function runRalphLoop(): Promise<void> {
   console.log(`Completion promise: ${completionPromise}`);
   console.log(`Max iterations: ${maxIterations > 0 ? maxIterations : "unlimited"}`);
   if (model) console.log(`Model: ${model}`);
+  if (disablePlugins) console.log("OpenCode plugins: non-auth plugins disabled");
   console.log("");
   console.log("Starting loop... (Ctrl+C to stop)");
   console.log("═".repeat(68));
@@ -286,15 +338,26 @@ async function runRalphLoop(): Promise<void> {
       }
       cmdArgs.push(fullPrompt);
 
+      const env = { ...process.env };
+      if (disablePlugins) {
+        env.OPENCODE_CONFIG = ensureFilteredPluginsConfig();
+      }
+
       // Run opencode using spawn for better argument handling
       currentProc = Bun.spawn(["opencode", ...cmdArgs], {
+        env,
         stdout: "pipe",
         stderr: "pipe",
       });
       const proc = currentProc;
 
-      const result = await new Response(proc.stdout).text();
-      const stderr = await new Response(proc.stderr).text();
+      const stdoutPromise = new Response(proc.stdout).text();
+      const stderrPromise = new Response(proc.stderr).text();
+      const [result, stderr, exitCode] = await Promise.all([
+        stdoutPromise,
+        stderrPromise,
+        proc.exited,
+      ]);
       currentProc = null; // Clear reference after subprocess completes
 
       if (stderr) {
@@ -302,6 +365,23 @@ async function runRalphLoop(): Promise<void> {
       }
 
       console.log(result);
+
+      if (detectPlaceholderPluginError(stderr) || detectPlaceholderPluginError(result)) {
+        console.error(
+          "\n❌ OpenCode tried to load the npm plugin 'ralph-wiggum', which is a placeholder package.",
+        );
+        console.error(
+          "Remove 'ralph-wiggum' from your opencode.json plugin list, or re-run with --no-plugins.",
+        );
+        clearState();
+        process.exit(1);
+      }
+
+      if (exitCode !== 0) {
+        console.error(`\n❌ OpenCode exited with code ${exitCode}. Stopping the loop.`);
+        clearState();
+        process.exit(exitCode);
+      }
 
       // Check for completion
       if (checkCompletion(result, completionPromise)) {
