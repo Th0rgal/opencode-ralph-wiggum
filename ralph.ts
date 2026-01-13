@@ -185,7 +185,8 @@ if (args.includes("--status")) {
 
     // Struggle detection
     const struggle = history.struggleIndicators;
-    if (struggle.noProgressIterations >= 3 || struggle.shortIterations >= 3 || Object.keys(struggle.repeatedErrors).length > 0) {
+    const hasRepeatedErrors = Object.values(struggle.repeatedErrors).some(count => count >= 2);
+    if (struggle.noProgressIterations >= 3 || struggle.shortIterations >= 3 || hasRepeatedErrors) {
       console.log(`\n⚠️  STRUGGLE INDICATORS:`);
       if (struggle.noProgressIterations >= 3) {
         console.log(`   - No file changes in ${struggle.noProgressIterations} iterations`);
@@ -1044,6 +1045,15 @@ async function runRalphLoop(): Promise<void> {
       await new Promise(r => setTimeout(r, 1000));
 
     } catch (error) {
+      // Kill subprocess if still running to prevent orphaned processes
+      if (currentProc) {
+        try {
+          currentProc.kill();
+        } catch {
+          // Process may have already exited
+        }
+        currentProc = null;
+      }
       console.error(`\n❌ Error in iteration ${state.iteration}:`, error);
       console.log("Continuing to next iteration...");
       state.iteration++;
