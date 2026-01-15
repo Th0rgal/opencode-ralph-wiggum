@@ -10,7 +10,7 @@ import { $ } from "bun";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { join } from "path";
 
-const VERSION = "1.0.8";
+const VERSION = "1.0.9";
 
 // Context file path for mid-loop injection
 const stateDir = join(process.cwd(), ".opencode");
@@ -964,8 +964,10 @@ async function runRalphLoop(): Promise<void> {
       }
 
       // Run opencode using spawn for better argument handling
+      // stdin is inherited so users can respond to permission prompts if needed
       currentProc = Bun.spawn(["opencode", ...cmdArgs], {
         env,
+        stdin: "inherit",
         stdout: "pipe",
         stderr: "pipe",
       });
