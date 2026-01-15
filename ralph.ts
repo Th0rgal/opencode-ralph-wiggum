@@ -10,7 +10,7 @@ import { $ } from "bun";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { join } from "path";
 
-const VERSION = "1.0.7";
+const VERSION = "1.0.8";
 
 // Context file path for mid-loop injection
 const stateDir = join(process.cwd(), ".opencode");
@@ -41,6 +41,7 @@ Options:
   --verbose-tools     Print every tool line (disable compact tool summary)
   --no-plugins        Disable non-auth OpenCode plugins for this run
   --no-commit         Don't auto-commit after each iteration
+  --allow-all         Auto-approve all tool permissions (for non-interactive use)
   --version, -v       Show version
   --help, -h          Show this help
 
@@ -278,6 +279,7 @@ let completionPromise = "COMPLETE";
 let model = "";
 let autoCommit = true;
 let disablePlugins = false;
+let allowAllPermissions = false;
 let promptFile = "";
 let streamOutput = true;
 let verboseTools = false;
@@ -326,6 +328,8 @@ for (let i = 0; i < args.length; i++) {
     autoCommit = false;
   } else if (arg === "--no-plugins") {
     disablePlugins = true;
+  } else if (arg === "--allow-all") {
+    allowAllPermissions = true;
   } else if (arg.startsWith("-")) {
     console.error(`Error: Unknown option: ${arg}`);
     console.error("Run 'ralph --help' for available options");
@@ -434,29 +438,49 @@ function loadPluginsFromConfig(configPath: string): string[] {
   }
 }
 
-function ensureFilteredPluginsConfig(): string {
+function ensureRalphConfig(options: { filterPlugins?: boolean; allowAllPermissions?: boolean }): string {
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
-  const configPath = join(stateDir, "ralph-opencode.no-plugins.json");
+  const configPath = join(stateDir, "ralph-opencode.config.json");
   const userConfigPath = join(process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config"), "opencode", "opencode.json");
   const projectConfigPath = join(process.cwd(), ".opencode", "opencode.json");
-  const plugins = [
-    ...loadPluginsFromConfig(userConfigPath),
-    ...loadPluginsFromConfig(projectConfigPath),
-  ];
-  const filtered = Array.from(new Set(plugins)).filter(p => /auth/i.test(p));
-  writeFileSync(
-    configPath,
-    JSON.stringify(
-      {
-        $schema: "https://opencode.ai/config.json",
-        plugin: filtered,
-      },
-      null,
-      2,
-    ),
-  );
+
+  const config: Record<string, unknown> = {
+    $schema: "https://opencode.ai/config.json",
+  };
+
+  // Filter plugins if requested (only keep auth plugins)
+  if (options.filterPlugins) {
+    const plugins = [
+      ...loadPluginsFromConfig(userConfigPath),
+      ...loadPluginsFromConfig(projectConfigPath),
+    ];
+    config.plugin = Array.from(new Set(plugins)).filter(p => /auth/i.test(p));
+  }
+
+  // Auto-allow all permissions for non-interactive use
+  if (options.allowAllPermissions) {
+    config.permission = {
+      read: "allow",
+      edit: "allow",
+      glob: "allow",
+      grep: "allow",
+      list: "allow",
+      bash: "allow",
+      task: "allow",
+      webfetch: "allow",
+      websearch: "allow",
+      codesearch: "allow",
+      todowrite: "allow",
+      todoread: "allow",
+      question: "allow",
+      lsp: "allow",
+      external_directory: "allow",
+    };
+  }
+
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
   return configPath;
 }
 
@@ -865,6 +889,7 @@ async function runRalphLoop(): Promise<void> {
   console.log(`Max iterations: ${maxIterations > 0 ? maxIterations : "unlimited"}`);
   if (model) console.log(`Model: ${model}`);
   if (disablePlugins) console.log("OpenCode plugins: non-auth plugins disabled");
+  if (allowAllPermissions) console.log("Permissions: auto-approve all tools");
   console.log("");
   console.log("Starting loop... (Ctrl+C to stop)");
   console.log("═".repeat(68));
@@ -931,8 +956,11 @@ async function runRalphLoop(): Promise<void> {
       cmdArgs.push(fullPrompt);
 
       const env = { ...process.env };
-      if (disablePlugins) {
-        env.OPENCODE_CONFIG = ensureFilteredPluginsConfig();
+      if (disablePlugins || allowAllPermissions) {
+        env.OPENCODE_CONFIG = ensureRalphConfig({
+          filterPlugins: disablePlugins,
+          allowAllPermissions: allowAllPermissions,
+        });
       }
 
       // Run opencode using spawn for better argument handling
