@@ -3,6 +3,10 @@
 </p>
 
 <p align="center">
+  <img src="screenshot.webp" alt="Ralph Wiggum Screenshot" />
+</p>
+
+<p align="center">
   <strong>Iterative AI development loops. Same prompt. Persistent progress.</strong><br>
   <em>Based on <a href="https://ghuntley.com/ralph/">ghuntley.com/ralph</a></em>
 </p>

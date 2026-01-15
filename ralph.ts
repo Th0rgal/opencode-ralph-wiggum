@@ -1057,9 +1057,7 @@ async function runRalphLoop(): Promise<void> {
       }
 
       if (exitCode !== 0) {
-        console.error(`\n❌ OpenCode exited with code ${exitCode}. Stopping the loop.`);
-        clearState();
-        process.exit(exitCode);
+        console.warn(`\n⚠️  OpenCode exited with code ${exitCode}. Continuing to next iteration.`);
       }
 
       // Check for completion
