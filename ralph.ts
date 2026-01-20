@@ -17,6 +17,7 @@ const stateDir = join(process.cwd(), ".opencode");
 const statePath = join(stateDir, "ralph-loop.state.json");
 const contextPath = join(stateDir, "ralph-context.md");
 const historyPath = join(stateDir, "ralph-history.json");
+const tasksPath = join(stateDir, "ralph-tasks.md");
 
 // Parse arguments
 const args = process.argv.slice(2);
@@ -36,6 +37,8 @@ Options:
   --min-iterations N  Minimum iterations before completion allowed (default: 1)
   --max-iterations N  Maximum iterations before stopping (default: unlimited)
   --completion-promise TEXT  Phrase that signals completion (default: COMPLETE)
+  --tasks, -t         Enable Tasks Mode for structured task tracking
+  --task-promise TEXT Phrase that signals single task completion (default: READY_FOR_NEXT_TASK)
   --model MODEL       Model to use (e.g., anthropic/claude-sonnet)
   --prompt-file, --file, -f  Read prompt content from a file
   --no-stream         Buffer OpenCode output and print at the end
@@ -48,8 +51,12 @@ Options:
 
 Commands:
   --status            Show current Ralph loop status and history
+  --status --tasks    Show status including current task list
   --add-context TEXT  Add context for the next iteration (or edit .opencode/ralph-context.md)
   --clear-context     Clear any pending context
+  --list-tasks        Display the current task list with indices
+  --add-task "desc"   Add a new task to the list
+  --remove-task N     Remove task at index N (including subtasks)
 
 Examples:
   ralph "Build a REST API for todos"
@@ -142,6 +149,7 @@ if (args.includes("--status")) {
   const state = loadState();
   const history = loadHistory();
   const context = existsSync(contextPath) ? readFileSync(contextPath, "utf-8").trim() : null;
+  const showTasks = args.includes("--tasks");
 
   console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
@@ -166,6 +174,34 @@ if (args.includes("--status")) {
   if (context) {
     console.log(`\n📝 PENDING CONTEXT (will be injected next iteration):`);
     console.log(`   ${context.split("\n").join("\n   ")}`);
+  }
+
+  if (showTasks) {
+    if (existsSync(tasksPath)) {
+      try {
+        const tasksContent = readFileSync(tasksPath, "utf-8");
+        const tasks = parseTasks(tasksContent);
+        if (tasks.length > 0) {
+          console.log(`\n📋 CURRENT TASKS:`);
+          for (let i = 0; i < tasks.length; i++) {
+            const task = tasks[i];
+            const statusIcon = task.status === "complete" ? "✅" : task.status === "in-progress" ? "🔄" : "⏸️";
+            console.log(`   ${i + 1}. ${statusIcon} ${task.text}`);
+            
+            for (const subtask of task.subtasks) {
+              const subStatusIcon = subtask.status === "complete" ? "✅" : subtask.status === "in-progress" ? "🔄" : "⏸️";
+              console.log(`      ${subStatusIcon} ${subtask.text}`);
+            }
+          }
+        } else {
+          console.log(`\n📋 CURRENT TASKS: (no tasks found)`);
+        }
+      } catch {
+        console.log(`\n📋 CURRENT TASKS: (error reading tasks)`);
+      }
+    } else {
+      console.log(`\n📋 CURRENT TASKS: (no tasks file found)`);
+    }
   }
 
   if (history.iterations.length > 0) {
@@ -259,6 +295,115 @@ if (args.includes("--clear-context")) {
   process.exit(0);
 }
 
+// List tasks command
+if (args.includes("--list-tasks")) {
+  if (!existsSync(tasksPath)) {
+    console.log("No tasks file found. Use --add-task to create your first task.");
+    process.exit(0);
+  }
+  
+  try {
+    const tasksContent = readFileSync(tasksPath, "utf-8");
+    const tasks = parseTasks(tasksContent);
+    displayTasksWithIndices(tasks);
+  } catch (error) {
+    console.error("Error reading tasks file:", error);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+// Add task command
+const addTaskIdx = args.indexOf("--add-task");
+if (addTaskIdx !== -1) {
+  const taskDescription = args[addTaskIdx + 1];
+  if (!taskDescription) {
+    console.error("Error: --add-task requires a description");
+    console.error("Usage: ralph --add-task \"Task description\"");
+    process.exit(1);
+  }
+  
+  if (!existsSync(stateDir)) {
+    mkdirSync(stateDir, { recursive: true });
+  }
+  
+  try {
+    let tasksContent = "";
+    if (existsSync(tasksPath)) {
+      tasksContent = readFileSync(tasksPath, "utf-8");
+    }
+    
+    const newTaskContent = tasksContent + (tasksContent.trim() ? "\n" : "") + `- [ ] ${taskDescription}`;
+    writeFileSync(tasksPath, newTaskContent);
+    console.log(`✅ Task added: "${taskDescription}"`);
+  } catch (error) {
+    console.error("Error adding task:", error);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+// Remove task command
+const removeTaskIdx = args.indexOf("--remove-task");
+if (removeTaskIdx !== -1) {
+  const taskIndexStr = args[removeTaskIdx + 1];
+  if (!taskIndexStr || isNaN(parseInt(taskIndexStr))) {
+    console.error("Error: --remove-task requires a valid number");
+    console.error("Usage: ralph --remove-task 3");
+    process.exit(1);
+  }
+  
+  const taskIndex = parseInt(taskIndexStr);
+  
+  if (!existsSync(tasksPath)) {
+    console.error("Error: No tasks file found");
+    process.exit(1);
+  }
+  
+  try {
+    const tasksContent = readFileSync(tasksPath, "utf-8");
+    const tasks = parseTasks(tasksContent);
+    
+    if (taskIndex < 1 || taskIndex > tasks.length) {
+      console.error(`Error: Task index ${taskIndex} is out of range (1-${tasks.length})`);
+      process.exit(1);
+    }
+    
+    // Remove the task and its subtasks
+    const lines = tasksContent.split("\n");
+    const newLines: string[] = [];
+    let inRemovedTask = false;
+    let currentTaskLine = 0;
+    
+    for (const line of lines) {
+      // Check if this is a top-level task (starts with "- [" at beginning of line)
+      if (line.match(/^-\s*\[/)) {
+        currentTaskLine++;
+        if (currentTaskLine === taskIndex) {
+          inRemovedTask = true;
+          continue; // Skip this task line
+        } else {
+          inRemovedTask = false;
+        }
+      }
+      
+      // Skip subtasks of the removed task (any indented line starting with - [)
+      if (inRemovedTask && line.match(/^\s*-\s*\[/)) {
+        continue;
+      }
+      
+      newLines.push(line);
+    }
+    
+    writeFileSync(tasksPath, newLines.join("\n"));
+    console.log(`✅ Removed task ${taskIndex} and its subtasks`);
+  } catch (error) {
+    console.error("Error removing task:", error);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 function formatDurationLong(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);
@@ -273,11 +418,172 @@ function formatDurationLong(ms: number): string {
   return `${seconds}s`;
 }
 
+interface Task {
+  text: string;
+  status: "todo" | "in-progress" | "complete";
+  subtasks: Task[];
+  originalLine: string;
+}
+
+// Parse markdown tasks into structured data
+function parseTasks(content: string): Task[] {
+  const tasks: Task[] = [];
+  const lines = content.split("\n");
+  let currentTask: Task | null = null;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Top-level task
+    if (trimmed.startsWith("- [") && trimmed.includes("]")) {
+      if (currentTask) {
+        tasks.push(currentTask);
+      }
+      
+      const match = trimmed.match(/- \[([ x\/])\]\s*(.+)/);
+      if (match) {
+        const [, statusChar, text] = match;
+        let status: Task["status"] = "todo";
+        if (statusChar === "x") status = "complete";
+        else if (statusChar === "/") status = "in-progress";
+        
+        currentTask = {
+          text,
+          status,
+          subtasks: [],
+          originalLine: line
+        };
+      }
+    }
+    // Subtask
+    else if (trimmed.startsWith("  - [") && trimmed.includes("]") && currentTask) {
+      const match = trimmed.match(/  - \[([ x\/])\]\s*(.+)/);
+      if (match) {
+        const [, statusChar, text] = match;
+        let status: Task["status"] = "todo";
+        if (statusChar === "x") status = "complete";
+        else if (statusChar === "/") status = "in-progress";
+        
+        currentTask.subtasks.push({
+          text,
+          status,
+          subtasks: [],
+          originalLine: line
+        });
+      }
+    }
+  }
+  
+  if (currentTask) {
+    tasks.push(currentTask);
+  }
+  
+  return tasks;
+}
+
+// Display tasks with numbering for CLI
+function displayTasksWithIndices(tasks: Task[]): void {
+  if (tasks.length === 0) {
+    console.log("No tasks found.");
+    return;
+  }
+  
+  console.log("Current tasks:");
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    const statusIcon = task.status === "complete" ? "✅" : task.status === "in-progress" ? "🔄" : "⏸️";
+    console.log(`${i + 1}. ${statusIcon} ${task.text}`);
+    
+    for (const subtask of task.subtasks) {
+      const subStatusIcon = subtask.status === "complete" ? "✅" : subtask.status === "in-progress" ? "🔄" : "⏸️";
+      console.log(`   ${subStatusIcon} ${subtask.text}`);
+    }
+  }
+}
+
+// Find the current in-progress task (marked with [/])
+function findCurrentTask(tasks: Task[]): Task | null {
+  for (const task of tasks) {
+    if (task.status === "in-progress") {
+      return task;
+    }
+  }
+  return null;
+}
+
+// Mark a task as complete (change status to [x])
+function markTaskComplete(taskIndex: number): boolean {
+  if (!existsSync(tasksPath)) {
+    return false;
+  }
+  
+  try {
+    const content = readFileSync(tasksPath, "utf-8");
+    const lines = content.split("\n");
+    let currentTaskLine = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim().startsWith("- [")) {
+        currentTaskLine++;
+        if (currentTaskLine === taskIndex) {
+          // Change status to [x]
+          lines[i] = line.replace(/^(\s*-\s*\[)[ x\/](\]\s*)/, "$1x$2");
+          writeFileSync(tasksPath, lines.join("\n"));
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// Mark a task as in-progress (change status to [/])
+function markTaskInProgress(taskIndex: number): boolean {
+  if (!existsSync(tasksPath)) {
+    return false;
+  }
+  
+  try {
+    const content = readFileSync(tasksPath, "utf-8");
+    const lines = content.split("\n");
+    let currentTaskLine = 0;
+    
+    // First pass: clear any existing in-progress tasks
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.match(/^-\s*\[\/\]/)) {
+        lines[i] = line.replace(/^(\s*-\s*\[)[ x\/](\]\s*)/, "$1 $2");
+      }
+    }
+    
+    // Second pass: mark the target task as in-progress
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim().startsWith("- [")) {
+        currentTaskLine++;
+        if (currentTaskLine === taskIndex) {
+          lines[i] = line.replace(/^(\s*-\s*\[)[ x\/](\]\s*)/, "$1/$2");
+          writeFileSync(tasksPath, lines.join("\n"));
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // Parse options
 let prompt = "";
 let minIterations = 1; // default: 1 iteration minimum
 let maxIterations = 0; // 0 = unlimited
 let completionPromise = "COMPLETE";
+let tasksMode = false;
+let taskPromise = "READY_FOR_NEXT_TASK";
 let model = "";
 let autoCommit = true;
 let disablePlugins = false;
@@ -313,6 +619,15 @@ for (let i = 0; i < args.length; i++) {
       process.exit(1);
     }
     completionPromise = val;
+  } else if (arg === "--tasks" || arg === "-t") {
+    tasksMode = true;
+  } else if (arg === "--task-promise") {
+    const val = args[++i];
+    if (!val) {
+      console.error("Error: --task-promise requires a value");
+      process.exit(1);
+    }
+    taskPromise = val;
   } else if (arg === "--model") {
     const val = args[++i];
     if (!val) {
@@ -405,6 +720,8 @@ interface RalphState {
   minIterations: number;
   maxIterations: number;
   completionPromise: string;
+  tasksMode: boolean;
+  taskPromise: string;
   prompt: string;
   startedAt: string;
   model: string;
@@ -533,37 +850,118 @@ ${context}
 `
     : "";
 
+  // Add tasks mode section if enabled
+  const tasksSection = state.tasksMode ? getTasksModeSection(state) : "";
+
   return `
 # Ralph Wiggum Loop - Iteration ${state.iteration}
 
 You are in an iterative development loop. Work on the task below until you can genuinely complete it.
 ${contextSection}
+${tasksSection}
 ## Your Task
 
 ${state.prompt}
 
 ## Instructions
 
-1. Read the current state of files to understand what's been done
+1. Read the current state of files to understand what's been done${state.tasksMode ? `
+2. Read .opencode/ralph-tasks.md to see the current state of all tasks
+3. Find any task currently in progress (marked with [/]). If none, select the SINGLE highest priority incomplete task
+4. Focus exclusively on completing this one task` : `
 2. **Update your todo list** - Use the TodoWrite tool to track progress and plan remaining work
-3. Make progress on the task
+3. Make progress on the task`}
+${state.tasksMode ? `
+5. When the task is verified as complete, mark it as complete in .opencode/ralph-tasks.md
+6. After updating the file, end the iteration by outputting: <promise>${state.taskPromise}</promise>
+7. Only output <promise>${state.completionPromise}</promise> when ALL tasks in .opencode/ralph-tasks.md are finished` : `
 4. Run tests/verification if applicable
 5. When the task is GENUINELY COMPLETE, output:
-   <promise>${state.completionPromise}</promise>
+   <promise>${state.completionPromise}</promise>`}
 
 ## Critical Rules
 
-- ONLY output <promise>${state.completionPromise}</promise> when the task is truly done
+${state.tasksMode ? `- ONLY output <promise>${state.taskPromise}</promise> when the current task is complete and marked in ralph-tasks.md
+- ONLY output <promise>${state.completionPromise}</promise> when ALL tasks are truly done` : `- ONLY output <promise>${state.completionPromise}</promise> when the task is truly done`}
 - Do NOT lie or output false promises to exit the loop
 - If stuck, try a different approach
 - Check your work before claiming completion
-- The loop will continue until you succeed
-- **IMPORTANT**: Update your todo list at the start of each iteration to show progress
+- The loop will continue until you succeed${state.tasksMode ? `
+- Work on ONE task at a time - read ralph-tasks.md to find the current task` : `
+- **IMPORTANT**: Update your todo list at the start of each iteration to show progress`}
 
-## Current Iteration: ${state.iteration}${state.maxIterations > 0 ? ` / ${state.maxIterations}` : " (unlimited)"} (min: ${state.minIterations ?? 1})
+## Current Iteration: ${state.iteration}${state.maxIterations > 0 ? ` / ${state.maxIterations}` : " (unlimited)"} (min: ${state.minIterations ?? 1})${state.tasksMode ? "\n\nTasks Mode: ENABLED - Work on one task at a time from ralph-tasks.md" : ""}
 
 Now, work on the task. Good luck!
 `.trim();
+}
+
+function getTasksModeSection(state: RalphState): string {
+  if (!existsSync(tasksPath)) {
+    return `
+## TASKS MODE: Enabled (no tasks file found)
+
+Tasks file will be created at: ${tasksPath}
+`;
+  }
+
+  try {
+    const tasksContent = readFileSync(tasksPath, "utf-8");
+    const tasks = parseTasks(tasksContent);
+    const currentTask = findCurrentTask(tasks);
+    const incompleteTasks = tasks.filter(t => t.status !== "complete");
+    
+    let taskInstructions = "";
+    if (currentTask) {
+      taskInstructions = `
+🔄 CURRENT TASK: "${currentTask.text}"
+   - Status: In Progress
+   - Focus on completing this specific task
+   - When done: Mark as [x] in ralph-tasks.md and output <promise>${state.taskPromise}</promise>`;
+    } else if (incompleteTasks.length > 0) {
+      const nextTask = incompleteTasks[0];
+      taskInstructions = `
+📍 NEXT TASK: "${nextTask.text}"
+   - Status: Not Started  
+   - Mark as [/] in ralph-tasks.md before starting
+   - When done: Mark as [x] and output <promise>${state.taskPromise}</promise>`;
+    } else {
+      taskInstructions = `
+✅ ALL TASKS COMPLETE!
+   - No incomplete tasks found
+   - Output <promise>${state.completionPromise}</promise> to finish`;
+    }
+
+    return `
+## TASKS MODE: You are working on one task at a time.
+
+Current tasks from .opencode/ralph-tasks.md:
+${tasksContent}
+
+${taskInstructions}
+
+Instructions:
+1. Read the tasks above to see the current state
+2. Find any task currently in progress (marked with [/]). If none, select the SINGLE highest priority incomplete task
+3. Focus exclusively on completing this one task
+4. When the task is verified as complete, mark it as complete in .opencode/ralph-tasks.md
+5. After updating the file, end the iteration by outputting: <promise>${state.taskPromise}</promise>
+6. Only output <promise>${state.completionPromise}</promise> when ALL tasks in .opencode/ralph-tasks.md are finished
+
+Example flow:
+- Iteration 1: Complete task A -> Update ralph-tasks.md -> <promise>${state.taskPromise}</promise>
+- Iteration 2: Complete task B -> Update ralph-tasks.md -> <promise>${state.taskPromise}</promise>
+- Iteration 3: No remaining tasks -> <promise>${state.completionPromise}</promise>
+
+---
+`;
+  } catch {
+    return `
+## TASKS MODE: Error reading tasks file
+
+Unable to read ${tasksPath}. The file may be corrupted.
+`;
+  }
 }
 
 // Check if output contains the completion promise
@@ -880,12 +1278,20 @@ async function runRalphLoop(): Promise<void> {
     minIterations,
     maxIterations,
     completionPromise,
+    tasksMode,
+    taskPromise,
     prompt,
     startedAt: new Date().toISOString(),
     model,
   };
 
   saveState(state);
+
+  // Create tasks file if tasks mode is enabled and file doesn't exist
+  if (tasksMode && !existsSync(tasksPath)) {
+    writeFileSync(tasksPath, "# Ralph Tasks\n\nAdd your tasks here:\n- [ ] Example task\n");
+    console.log(`📋 Created tasks file: ${tasksPath}`);
+  }
 
   // Initialize history tracking
   const history: RalphHistory = {
@@ -903,6 +1309,10 @@ async function runRalphLoop(): Promise<void> {
     console.log(`Task: ${promptPreview}`);
   }
   console.log(`Completion promise: ${completionPromise}`);
+  if (tasksMode) {
+    console.log(`Tasks mode: ENABLED`);
+    console.log(`Task completion promise: ${taskPromise}`);
+  }
   console.log(`Min iterations: ${minIterations}`);
   console.log(`Max iterations: ${maxIterations > 0 ? maxIterations : "unlimited"}`);
   if (model) console.log(`Model: ${model}`);
@@ -1026,6 +1436,7 @@ async function runRalphLoop(): Promise<void> {
 
       const combinedOutput = `${result}\n${stderr}`;
       const completionDetected = checkCompletion(combinedOutput, completionPromise);
+      const taskCompletionDetected = tasksMode ? checkCompletion(combinedOutput, taskPromise) : false;
 
       const iterationDuration = Date.now() - iterationStart;
 
@@ -1110,8 +1521,13 @@ async function runRalphLoop(): Promise<void> {
         console.warn(`\n⚠️  OpenCode exited with code ${exitCode}. Continuing to next iteration.`);
       }
 
-      // Check for completion
-      if (completionDetected) {
+      // Check for task completion (only in tasks mode)
+      if (taskCompletionDetected) {
+        console.log(`\n🔄 Task completion detected: <promise>${taskPromise}</promise>`);
+        console.log(`   Moving to next task in iteration ${state.iteration + 1}...`);
+      }
+      // Check for full completion
+      else if (completionDetected) {
         if (state.iteration < minIterations) {
           // Completion detected but minimum iterations not reached
           console.log(`\n⏳ Completion promise detected, but minimum iterations (${minIterations}) not yet reached.`);
