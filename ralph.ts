@@ -22,10 +22,12 @@ type AgentType = "opencode" | "claude-code" | "codex";
 
 type AgentEnvOptions = { filterPlugins?: boolean; allowAllPermissions?: boolean };
 
+type AgentBuildArgsOptions = { allowAllPermissions?: boolean };
+
 interface AgentConfig {
   type: AgentType;
   command: string;
-  buildArgs: (prompt: string, model: string) => string[];
+  buildArgs: (prompt: string, model: string, options?: AgentBuildArgsOptions) => string[];
   buildEnv: (options: AgentEnvOptions) => Record<string, string>;
   parseToolOutput: (line: string) => string | null;
   configName: string;
@@ -35,7 +37,7 @@ const AGENTS: Record<AgentType, AgentConfig> = {
   opencode: {
     type: "opencode",
     command: "opencode",
-    buildArgs: (promptText, modelName) => {
+    buildArgs: (promptText, modelName, _options) => {
       const cmdArgs = ["run"];
       if (modelName) {
         cmdArgs.push("-m", modelName);
@@ -62,10 +64,13 @@ const AGENTS: Record<AgentType, AgentConfig> = {
   "claude-code": {
     type: "claude-code",
     command: "claude",
-    buildArgs: (promptText, modelName) => {
+    buildArgs: (promptText, modelName, options) => {
       const cmdArgs = ["-p", promptText];
       if (modelName) {
         cmdArgs.push("--model", modelName);
+      }
+      if (options?.allowAllPermissions) {
+        cmdArgs.push("--dangerously-skip-permissions");
       }
       return cmdArgs;
     },
@@ -79,10 +84,13 @@ const AGENTS: Record<AgentType, AgentConfig> = {
   codex: {
     type: "codex",
     command: "codex",
-    buildArgs: (promptText, modelName) => {
+    buildArgs: (promptText, modelName, options) => {
       const cmdArgs = ["exec"];
       if (modelName) {
         cmdArgs.push("--model", modelName);
+      }
+      if (options?.allowAllPermissions) {
+        cmdArgs.push("--full-auto");
       }
       cmdArgs.push(promptText);
       return cmdArgs;
@@ -1095,15 +1103,8 @@ async function runRalphLoop(): Promise<void> {
     const iterationStart = Date.now();
 
     try {
-      // Build command arguments
-      const cmdArgs = agentConfig.buildArgs(fullPrompt, model);
-      if (allowAllPermissions) {
-        if (agentType === "claude-code") {
-          cmdArgs.push("--dangerously-skip-permissions");
-        } else if (agentType === "codex") {
-          cmdArgs.push("--full-auto");
-        }
-      }
+      // Build command arguments (permission flags are handled inside buildArgs)
+      const cmdArgs = agentConfig.buildArgs(fullPrompt, model, { allowAllPermissions });
 
       const env = agentConfig.buildEnv({
         filterPlugins: disablePlugins,
