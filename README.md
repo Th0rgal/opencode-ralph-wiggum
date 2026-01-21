@@ -123,6 +123,7 @@ ralph "<prompt>" [options]
 
 Options:
   --agent AGENT            AI agent to use: opencode (default), claude-code, codex
+  --min-iterations N       Minimum iterations before completion allowed (default: 1)
   --max-iterations N       Stop after N iterations (default: unlimited)
   --completion-promise T   Text that signals completion (default: COMPLETE)
   --model MODEL            Model to use (agent-specific)
@@ -132,6 +133,7 @@ Options:
   --no-plugins             Disable non-auth OpenCode plugins for this run (opencode only)
   --no-commit              Don't auto-commit after iterations
   --allow-all              Auto-approve all tool permissions (default: on)
+  --no-allow-all           Require interactive permission prompts
   --help                   Show help
 ```
 
