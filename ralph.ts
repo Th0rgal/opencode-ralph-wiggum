@@ -121,6 +121,7 @@ Options:
   --no-plugins        Disable non-auth OpenCode plugins for this run (opencode only)
   --no-commit         Don't auto-commit after each iteration
   --allow-all         Auto-approve all tool permissions (default: on)
+  --no-allow-all      Require interactive permission prompts
   --version, -v       Show version
   --help, -h          Show this help
 
@@ -428,6 +429,8 @@ for (let i = 0; i < args.length; i++) {
     disablePlugins = true;
   } else if (arg === "--allow-all") {
     allowAllPermissions = true;
+  } else if (arg === "--no-allow-all") {
+    allowAllPermissions = false;
   } else if (arg.startsWith("-")) {
     console.error(`Error: Unknown option: ${arg}`);
     console.error("Run 'ralph --help' for available options");
