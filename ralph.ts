@@ -488,8 +488,8 @@ if (removeTaskIdx !== -1) {
         }
       }
 
-      // Skip subtasks of the removed task (any indented line starting with - [)
-      if (inRemovedTask && line.match(/^\s+- \[/)) {
+      // Skip all indented content under the removed task (subtasks, notes, etc.)
+      if (inRemovedTask && line.match(/^\s+/) && line.trim() !== "") {
         continue;
       }
 
