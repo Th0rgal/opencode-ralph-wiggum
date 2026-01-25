@@ -177,6 +177,7 @@ Options:
   --tasks, -t              Enable Tasks Mode for structured task tracking
   --task-promise T         Text that signals task completion (default: READY_FOR_NEXT_TASK)
   --model MODEL            Model to use (agent-specific)
+  --rotation LIST          Agent/model rotation for each iteration (comma-separated)
   --prompt-file, --file, -f  Read prompt content from a file
   --no-stream              Buffer agent output and print at the end
   --verbose-tools          Print every tool line (disable compact tool summary)
@@ -558,6 +559,94 @@ ralph "Generate unit tests for all utility functions" \
 
 ```bash
 ralph "Fix all TypeScript errors" --max-iterations 10
+```
+
+## Agent Rotation
+
+Agent rotation lets you cycle through different agent/model combinations across iterations. This is useful for leveraging the strengths of different models or comparing their performance on a task.
+
+### Format
+
+Each rotation entry uses the `agent:model` format:
+
+```
+--rotation "agent1:model1,agent2:model2,agent3:model3"
+```
+
+**Valid agents:** `opencode`, `claude-code`, `codex`
+
+### Example Usage
+
+```bash
+# Alternate between OpenCode and Claude Code
+ralph "Build a REST API" \
+  --rotation "opencode:claude-sonnet-4,claude-code:claude-sonnet-4" \
+  --max-iterations 10
+
+# Cycle through three different configurations
+ralph "Refactor the auth module" \
+  --rotation "opencode:claude-sonnet-4,claude-code:claude-sonnet-4,codex:gpt-5-codex" \
+  --max-iterations 15
+```
+
+### Flag Interaction
+
+When `--rotation` is used, the `--agent` and `--model` flags are **ignored**. The rotation list takes precedence for agent/model selection.
+
+### Cycling Behavior
+
+The rotation cycles back to the first entry after reaching the end:
+
+- Iteration 1 → Entry 1
+- Iteration 2 → Entry 2
+- Iteration 3 → Entry 1 (wraps around for a 2-entry rotation)
+- ...and so on
+
+### Error Messages
+
+Invalid rotation entries produce clear error messages:
+
+**Invalid agent name:**
+```
+Error: Invalid agent 'invalid' in rotation entry 'invalid:model'. Valid agents: opencode, claude-code, codex
+```
+
+**Malformed entry (missing colon):**
+```
+Error: Invalid rotation entry 'opencode-model'. Expected format: agent:model
+```
+
+**Empty values:**
+```
+Error: Invalid rotation entry 'opencode:'. Both agent and model are required.
+```
+
+### Status Display
+
+When using `--status` with an active rotation, the output shows all rotation entries and marks the current one:
+
+```
+🔄 ACTIVE LOOP
+   Iteration:    3 / 10
+   Prompt:       Build a REST API...
+
+   Rotation (position 1/2):
+   1. opencode:claude-sonnet-4  **ACTIVE**
+   2. claude-code:claude-sonnet-4
+```
+
+### Iteration History
+
+The `--status` command shows which agent and model was used for each iteration:
+
+```
+📊 HISTORY (3 iterations)
+   Total time:   5m 23s
+
+   Recent iterations:
+   #1  2m 10s  opencode / claude-sonnet-4  Bash(5) Write(3) Read(2)
+   #2  1m 45s  claude-code / claude-sonnet-4  Edit(4) Bash(3) Read(2)
+   #3  1m 28s  opencode / claude-sonnet-4  Bash(2) Edit(1)
 ```
 
 ## Learn More
