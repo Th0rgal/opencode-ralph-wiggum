@@ -19,7 +19,8 @@ const contextPath = join(stateDir, "ralph-context.md");
 const historyPath = join(stateDir, "ralph-history.json");
 const tasksPath = join(stateDir, "ralph-tasks.md");
 
-type AgentType = "opencode" | "claude-code" | "codex";
+const AGENT_TYPES = ["opencode", "claude-code", "codex"] as const;
+type AgentType = (typeof AGENT_TYPES)[number];
 
 type AgentEnvOptions = { filterPlugins?: boolean; allowAllPermissions?: boolean };
 
@@ -126,6 +127,11 @@ Options:
   --tasks, -t         Enable Tasks Mode for structured task tracking
   --task-promise TEXT Phrase that signals task completion (default: READY_FOR_NEXT_TASK)
   --model MODEL       Model to use (agent-specific, e.g., anthropic/claude-sonnet)
+  --rotation LIST     Agent/model rotation for each iteration (comma-separated)
+                      Each entry must be "agent:model" format
+                      Valid agents: opencode, claude-code, codex
+                      Example: --rotation "opencode:claude-sonnet-4,claude-code:gpt-4o"
+                      When used, --agent and --model are ignored
   --prompt-file, --file, -f  Read prompt content from a file
   --no-stream         Buffer agent output and print at the end
   --verbose-tools     Print every tool line (disable compact tool summary)
@@ -180,6 +186,8 @@ interface IterationHistory {
   startedAt: string;
   endedAt: string;
   durationMs: number;
+  agent: AgentType;
+  model: string;
   toolsUsed: Record<string, number>;
   filesModified: string[];
   exitCode: number;
@@ -254,14 +262,27 @@ if (args.includes("--status")) {
     console.log(`   Started:      ${state.startedAt}`);
     console.log(`   Elapsed:      ${elapsedStr}`);
     console.log(`   Promise:      ${state.completionPromise}`);
-    const agentLabel = state.agent ? (AGENTS[state.agent]?.configName ?? state.agent) : "OpenCode";
-    console.log(`   Agent:        ${agentLabel}`);
-    if (state.model) console.log(`   Model:        ${state.model}`);
+    const rotationActive = !!(state.rotation && state.rotation.length > 0);
+    if (!rotationActive) {
+      const agentLabel = state.agent ? (AGENTS[state.agent]?.configName ?? state.agent) : "OpenCode";
+      console.log(`   Agent:        ${agentLabel}`);
+      if (state.model) console.log(`   Model:        ${state.model}`);
+    }
     if (state.tasksMode) {
       console.log(`   Tasks Mode:   ENABLED`);
       console.log(`   Task Promise: ${state.taskPromise}`);
     }
     console.log(`   Prompt:       ${state.prompt.substring(0, 60)}${state.prompt.length > 60 ? "..." : ""}`);
+    if (rotationActive) {
+      const activeIndex = state.rotation && state.rotation.length > 0
+        ? ((state.rotationIndex ?? 0) % state.rotation.length + state.rotation.length) % state.rotation.length
+        : 0;
+      console.log(`\n   Rotation (position ${activeIndex + 1}/${state.rotation.length}):`);
+      state.rotation.forEach((entry, index) => {
+        const activeLabel = index === activeIndex ? "  **ACTIVE**" : "";
+        console.log(`   ${index + 1}. ${entry}${activeLabel}`);
+      });
+    }
   } else {
     console.log(`⏹️  No active loop`);
   }
@@ -314,10 +335,12 @@ if (args.includes("--status")) {
       const tools = Object.entries(iter.toolsUsed)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
-        .map(([k, v]) => `${k}:${v}`)
+        .map(([k, v]) => `${k}(${v})`)
         .join(" ");
-      const status = iter.completionDetected ? "✅" : iter.exitCode !== 0 ? "❌" : "🔄";
-      console.log(`   ${status} #${iter.iteration}: ${formatDurationLong(iter.durationMs)} | ${tools || "no tools"}`);
+      const agentLabel = iter.agent ?? "unknown";
+      const modelLabel = iter.model ?? "unknown";
+      const agentModel = `${agentLabel} / ${modelLabel}`;
+      console.log(`   #${iter.iteration}  ${formatDurationLong(iter.durationMs)}  ${agentModel}  ${tools || "no tools"}`);
     }
 
     // Struggle detection
@@ -622,6 +645,8 @@ let tasksMode = false;
 let taskPromise = "READY_FOR_NEXT_TASK";
 let model = "";
 let agentType: AgentType = "opencode";
+let rotationInput = "";
+let rotation: string[] | null = null;
 let autoCommit = true;
 let disablePlugins = false;
 let allowAllPermissions = true;
@@ -632,12 +657,38 @@ let promptSource = "";
 
 const promptParts: string[] = [];
 
+function parseRotationInput(raw: string): string[] {
+  const entries = raw.split(",").map(entry => entry.trim());
+  const parsed: string[] = [];
+  for (const entry of entries) {
+    const parts = entry.split(":");
+    if (parts.length !== 2) {
+      console.error(`Error: Invalid rotation entry '${entry}'. Expected format: agent:model`);
+      process.exit(1);
+    }
+    const agent = parts[0].trim();
+    const modelName = parts[1].trim();
+    if (!agent || !modelName) {
+      console.error(`Error: Invalid rotation entry '${entry}'. Both agent and model are required.`);
+      process.exit(1);
+    }
+    if (!AGENT_TYPES.includes(agent as AgentType)) {
+      console.error(
+        `Error: Invalid agent '${agent}' in rotation entry '${entry}'. Valid agents: ${AGENT_TYPES.join(", ")}`,
+      );
+      process.exit(1);
+    }
+    parsed.push(`${agent}:${modelName}`);
+  }
+  return parsed;
+}
+
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
 
   if (arg === "--agent") {
     const val = args[++i];
-    if (!val || !["opencode", "claude-code", "codex"].includes(val)) {
+    if (!val) {
       console.error("Error: --agent requires: 'opencode', 'claude-code', or 'codex'");
       process.exit(1);
     }
@@ -672,6 +723,13 @@ for (let i = 0; i < args.length; i++) {
       process.exit(1);
     }
     taskPromise = val;
+  } else if (arg === "--rotation") {
+    const val = args[++i];
+    if (!val) {
+      console.error("Error: --rotation requires a value");
+      process.exit(1);
+    }
+    rotationInput = val;
   } else if (arg === "--model") {
     const val = args[++i];
     if (!val) {
@@ -707,6 +765,13 @@ for (let i = 0; i < args.length; i++) {
   } else {
     promptParts.push(arg);
   }
+}
+
+if (rotationInput) {
+  rotation = parseRotationInput(rotationInput);
+} else if (!AGENT_TYPES.includes(agentType)) {
+  console.error("Error: --agent requires: 'opencode', 'claude-code', or 'codex'");
+  process.exit(1);
 }
 
 function readPromptFile(path: string): string {
@@ -748,10 +813,15 @@ if (promptFile) {
 }
 
 if (!prompt) {
-  console.error("Error: No prompt provided");
-  console.error("Usage: ralph \"Your task description\" [options]");
-  console.error("Run 'ralph --help' for more information");
-  process.exit(1);
+  const existingState = loadState();
+  if (existingState?.active) {
+    prompt = existingState.prompt;
+  } else {
+    console.error("Error: No prompt provided");
+    console.error("Usage: ralph \"Your task description\" [options]");
+    console.error("Run 'ralph --help' for more information");
+    process.exit(1);
+  }
 }
 
 // Validate min/max iterations
@@ -772,6 +842,8 @@ interface RalphState {
   startedAt: string;
   model: string;
   agent: AgentType;
+  rotation?: string[];
+  rotationIndex?: number;
 }
 
 // Create or update state
@@ -1098,12 +1170,16 @@ function printIterationSummary(params: {
   toolCounts: Map<string, number>;
   exitCode: number;
   completionDetected: boolean;
+  agent: AgentType;
+  model: string;
 }): void {
   const toolSummary = formatToolSummary(params.toolCounts);
+  const duration = formatDuration(params.elapsedMs);
+  console.log(`Iteration ${params.iteration} completed in ${duration} (${params.agent} / ${params.model})`);
   console.log("\nIteration Summary");
   console.log("────────────────────────────────────────────────────────────────────");
   console.log(`Iteration: ${params.iteration}`);
-  console.log(`Elapsed:   ${formatDuration(params.elapsedMs)}`);
+  console.log(`Elapsed:   ${duration} (${params.agent} / ${params.model})`);
   if (toolSummary) {
     console.log(`Tools:     ${toolSummary}`);
   } else {
@@ -1334,15 +1410,39 @@ function extractErrors(output: string): string[] {
 async function runRalphLoop(): Promise<void> {
   // Check if a loop is already running
   const existingState = loadState();
-  if (existingState?.active) {
-    console.error(`Error: A Ralph loop is already active (iteration ${existingState.iteration})`);
-    console.error(`Started at: ${existingState.startedAt}`);
-    console.error(`To cancel it, press Ctrl+C in its terminal or delete ${statePath}`);
-    process.exit(1);
+  const resuming = !!existingState?.active;
+  if (resuming) {
+    minIterations = existingState.minIterations;
+    maxIterations = existingState.maxIterations;
+    completionPromise = existingState.completionPromise;
+    tasksMode = existingState.tasksMode;
+    taskPromise = existingState.taskPromise;
+    prompt = existingState.prompt;
+    model = existingState.model;
+    agentType = existingState.agent;
+    rotation = existingState.rotation ?? null;
+    console.log(`🔄 Resuming Ralph loop from ${statePath}`);
   }
 
-  const agentConfig = AGENTS[agentType];
-  await validateAgent(agentConfig);
+  const runtimeRotation = rotation ?? null;
+  const rotationActive = !!(runtimeRotation && runtimeRotation.length > 0);
+  const rotationIndex = rotationActive
+    ? ((existingState?.rotationIndex ?? 0) % runtimeRotation.length + runtimeRotation.length) % runtimeRotation.length
+    : 0;
+  const initialEntry = rotationActive ? runtimeRotation[rotationIndex].split(":") : null;
+  const initialAgentType = rotationActive ? (initialEntry![0] as AgentType) : agentType;
+  const initialModel = rotationActive ? initialEntry![1] : model;
+
+  if (rotationActive) {
+    const uniqueAgents = Array.from(new Set(runtimeRotation!.map(entry => entry.split(":")[0]))) as AgentType[];
+    for (const agent of uniqueAgents) {
+      await validateAgent(AGENTS[agent]);
+    }
+  } else {
+    await validateAgent(AGENTS[initialAgentType]);
+  }
+
+  const agentConfig = AGENTS[initialAgentType];
   if (disablePlugins && agentConfig.type === "claude-code") {
     console.warn("Warning: --no-plugins has no effect with Claude Code agent");
   }
@@ -1358,7 +1458,7 @@ async function runRalphLoop(): Promise<void> {
 `);
 
   // Initialize state
-  const state: RalphState = {
+  const state: RalphState = resuming && existingState ? existingState : {
     active: true,
     iteration: 1,
     minIterations,
@@ -1368,11 +1468,15 @@ async function runRalphLoop(): Promise<void> {
     taskPromise,
     prompt,
     startedAt: new Date().toISOString(),
-    model,
-    agent: agentType,
+    model: initialModel,
+    agent: initialAgentType,
+    rotation: rotation ?? undefined,
+    rotationIndex: rotationActive ? 0 : undefined,
   };
 
-  saveState(state);
+  if (!resuming) {
+    saveState(state);
+  }
 
   // Create tasks file if tasks mode is enabled and file doesn't exist
   if (tasksMode && !existsSync(tasksPath)) {
@@ -1384,12 +1488,14 @@ async function runRalphLoop(): Promise<void> {
   }
 
   // Initialize history tracking
-  const history: RalphHistory = {
+  const history: RalphHistory = resuming ? loadHistory() : {
     iterations: [],
     totalDurationMs: 0,
     struggleIndicators: { repeatedErrors: {}, noProgressIterations: 0, shortIterations: 0 }
   };
-  saveHistory(history);
+  if (!resuming) {
+    saveHistory(history);
+  }
 
   const promptPreview = prompt.replace(/\s+/g, " ").substring(0, 80) + (prompt.length > 80 ? "..." : "");
   if (promptSource) {
@@ -1406,7 +1512,7 @@ async function runRalphLoop(): Promise<void> {
   console.log(`Min iterations: ${minIterations}`);
   console.log(`Max iterations: ${maxIterations > 0 ? maxIterations : "unlimited"}`);
   console.log(`Agent: ${agentConfig.configName}`);
-  if (model) console.log(`Model: ${model}`);
+  if (initialModel) console.log(`Model: ${initialModel}`);
   if (disablePlugins && agentConfig.type === "opencode") {
     console.log("OpenCode plugins: non-auth plugins disabled");
   }
@@ -1466,13 +1572,27 @@ async function runRalphLoop(): Promise<void> {
     // Capture git state before iteration to detect per-iteration changes
     const snapshotBefore = await captureFileSnapshot();
 
+    const usingRotation = !!(state.rotation && state.rotation.length > 0);
+    const rotationIndex = usingRotation
+      ? ((state.rotationIndex ?? 0) % state.rotation.length + state.rotation.length) % state.rotation.length
+      : 0;
+    let currentAgent: AgentType = state.agent;
+    let currentModel = state.model;
+    if (usingRotation) {
+      const entry = state.rotation[rotationIndex];
+      const [entryAgent, entryModel] = entry.split(":");
+      currentAgent = entryAgent as AgentType;
+      currentModel = entryModel;
+    }
+    const agentConfig = AGENTS[currentAgent];
+
     // Build the prompt
     const fullPrompt = buildPrompt(state, agentConfig);
     const iterationStart = Date.now();
 
     try {
       // Build command arguments (permission flags are handled inside buildArgs)
-      const cmdArgs = agentConfig.buildArgs(fullPrompt, model, { allowAllPermissions });
+      const cmdArgs = agentConfig.buildArgs(fullPrompt, currentModel, { allowAllPermissions });
 
       const env = agentConfig.buildEnv({
         filterPlugins: disablePlugins,
@@ -1533,6 +1653,8 @@ async function runRalphLoop(): Promise<void> {
         toolCounts,
         exitCode,
         completionDetected,
+        agent: currentAgent,
+        model: currentModel,
       });
 
       // Track iteration history - compare against pre-iteration snapshot
@@ -1545,6 +1667,8 @@ async function runRalphLoop(): Promise<void> {
         startedAt: new Date(iterationStart).toISOString(),
         endedAt: new Date().toISOString(),
         durationMs: iterationDuration,
+        agent: currentAgent,
+        model: currentModel,
         toolsUsed: Object.fromEntries(toolCounts),
         filesModified,
         exitCode,
@@ -1593,7 +1717,7 @@ async function runRalphLoop(): Promise<void> {
         console.log(`   💡 Tip: Use 'ralph --add-context "hint"' in another terminal to guide the agent`);
       }
 
-      if (agentType === "opencode" && detectPlaceholderPluginError(combinedOutput)) {
+      if (currentAgent === "opencode" && detectPlaceholderPluginError(combinedOutput)) {
         console.error(
           "\n❌ OpenCode tried to load the legacy 'ralph-wiggum' plugin. This package is CLI-only.",
         );
@@ -1655,6 +1779,9 @@ async function runRalphLoop(): Promise<void> {
       }
 
       // Update state for next iteration
+      if (state.rotation && state.rotation.length > 0) {
+        state.rotationIndex = ((state.rotationIndex ?? 0) + 1) % state.rotation.length;
+      }
       state.iteration++;
       saveState(state);
 
@@ -1681,6 +1808,8 @@ async function runRalphLoop(): Promise<void> {
         startedAt: new Date(iterationStart).toISOString(),
         endedAt: new Date().toISOString(),
         durationMs: iterationDuration,
+        agent: currentAgent,
+        model: currentModel,
         toolsUsed: {},
         filesModified: [],
         exitCode: -1,
@@ -1691,6 +1820,9 @@ async function runRalphLoop(): Promise<void> {
       history.totalDurationMs += iterationDuration;
       saveHistory(history);
 
+      if (state.rotation && state.rotation.length > 0) {
+        state.rotationIndex = ((state.rotationIndex ?? 0) + 1) % state.rotation.length;
+      }
       state.iteration++;
       saveState(state);
       await new Promise(r => setTimeout(r, 2000));
