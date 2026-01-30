@@ -23,7 +23,7 @@ type AgentType = "opencode" | "claude-code" | "codex";
 
 type AgentEnvOptions = { filterPlugins?: boolean; allowAllPermissions?: boolean };
 
-type AgentBuildArgsOptions = { allowAllPermissions?: boolean };
+type AgentBuildArgsOptions = { allowAllPermissions?: boolean; extraFlags?: string[] };
 
 interface AgentConfig {
   type: AgentType;
@@ -38,10 +38,13 @@ const AGENTS: Record<AgentType, AgentConfig> = {
   opencode: {
     type: "opencode",
     command: "opencode",
-    buildArgs: (promptText, modelName, _options) => {
+    buildArgs: (promptText, modelName, options) => {
       const cmdArgs = ["run"];
       if (modelName) {
         cmdArgs.push("-m", modelName);
+      }
+      if (options?.extraFlags && options.extraFlags.length > 0) {
+        cmdArgs.push(...options.extraFlags);
       }
       cmdArgs.push(promptText);
       return cmdArgs;
@@ -73,6 +76,9 @@ const AGENTS: Record<AgentType, AgentConfig> = {
       if (options?.allowAllPermissions) {
         cmdArgs.push("--dangerously-skip-permissions");
       }
+      if (options?.extraFlags && options.extraFlags.length > 0) {
+        cmdArgs.push(...options.extraFlags);
+      }
       return cmdArgs;
     },
     buildEnv: () => ({ ...process.env }),
@@ -92,6 +98,9 @@ const AGENTS: Record<AgentType, AgentConfig> = {
       }
       if (options?.allowAllPermissions) {
         cmdArgs.push("--full-auto");
+      }
+      if (options?.extraFlags && options.extraFlags.length > 0) {
+        cmdArgs.push(...options.extraFlags);
       }
       cmdArgs.push(promptText);
       return cmdArgs;
@@ -135,6 +144,7 @@ Options:
   --no-allow-all      Require interactive permission prompts
   --version, -v       Show version
   --help, -h          Show this help
+  --                  Pass all remaining arguments to the agent (e.g., -- --extra-tags)
 
 Commands:
   --status            Show current Ralph loop status and history
@@ -153,6 +163,7 @@ Examples:
   ralph --prompt-file ./prompt.md --max-iterations 5
   ralph --status                                        # Check loop status
   ralph --add-context "Focus on the auth module first"  # Add hint for next iteration
+  ralph "Build API" -- --agent build                    # Pass flags to the agent
 
 How it works:
   1. Sends your prompt to the selected AI agent
@@ -631,6 +642,15 @@ let verboseTools = false;
 let promptSource = "";
 
 const promptParts: string[] = [];
+let extraAgentFlags: string[] = [];
+const doubleDashIndex = args.indexOf("--");
+
+// Extract extra flags after --
+if (doubleDashIndex !== -1) {
+  extraAgentFlags = args.slice(doubleDashIndex + 1);
+  // Remove -- and everything after it from args processing
+  args.splice(doubleDashIndex);
+}
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -1472,7 +1492,7 @@ async function runRalphLoop(): Promise<void> {
 
     try {
       // Build command arguments (permission flags are handled inside buildArgs)
-      const cmdArgs = agentConfig.buildArgs(fullPrompt, model, { allowAllPermissions });
+      const cmdArgs = agentConfig.buildArgs(fullPrompt, model, { allowAllPermissions, extraFlags: extraAgentFlags });
 
       const env = agentConfig.buildEnv({
         filterPlugins: disablePlugins,
