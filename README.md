@@ -124,14 +124,14 @@ bun add -g @th0rgal/ralph-wiggum
 ### From source
 
 ```bash
-git clone https://github.com/Th0rgal/ralph-wiggum
-cd ralph-wiggum
+git clone https://github.com/Th0rgal/open-ralph-wiggum
+cd open-ralph-wiggum
 ./install.sh
 ```
 
 ```powershell
-git clone https://github.com/Th0rgal/ralph-wiggum
-cd ralph-wiggum
+git clone https://github.com/Th0rgal/open-ralph-wiggum
+cd open-ralph-wiggum
 .\install.ps1
 ```
 
