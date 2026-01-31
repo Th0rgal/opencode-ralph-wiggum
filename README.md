@@ -14,9 +14,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Th0rgal/ralph-wiggum/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
-  <a href="https://github.com/Th0rgal/ralph-wiggum"><img src="https://img.shields.io/badge/built%20with-Bun%20%2B%20TypeScript-f472b6.svg" alt="Built with Bun + TypeScript"></a>
-  <a href="https://github.com/Th0rgal/ralph-wiggum/releases"><img src="https://img.shields.io/github/v/release/Th0rgal/ralph-wiggum?include_prereleases" alt="Release"></a>
+  <a href="https://github.com/Th0rgal/open-ralph-wiggum/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://github.com/Th0rgal/open-ralph-wiggum"><img src="https://img.shields.io/badge/built%20with-Bun%20%2B%20TypeScript-f472b6.svg" alt="Built with Bun + TypeScript"></a>
+  <a href="https://github.com/Th0rgal/open-ralph-wiggum/releases"><img src="https://img.shields.io/github/v/release/Th0rgal/ralph-wiggum?include_prereleases" alt="Release"></a>
 </p>
 
 <p align="center">
@@ -124,13 +124,13 @@ bun add -g @th0rgal/ralph-wiggum
 ### From source
 
 ```bash
-git clone https://github.com/Th0rgal/ralph-wiggum
+git clone https://github.com/Th0rgal/open-ralph-wiggum
 cd ralph-wiggum
 ./install.sh
 ```
 
 ```powershell
-git clone https://github.com/Th0rgal/ralph-wiggum
+git clone https://github.com/Th0rgal/open-ralph-wiggum
 cd ralph-wiggum
 .\install.ps1
 ```
